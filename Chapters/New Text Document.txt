@@ -1,0 +1,1 @@
+I want to structure this chapter in comprehensive lesson and labs. make lessons in app form using html css and js. create lessons for different section of the chapter. use hide and reveal for nessasary segments. If content can be tought in labs then please do if not make it lessons. make the labs a popup panel that stays until the user closes (corner x)
