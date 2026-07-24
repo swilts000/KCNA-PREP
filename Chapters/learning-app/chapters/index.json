@@ -34,5 +34,17 @@
     {
         "file": "chapter9.json",
         "title": "Chapter 9: Understanding Cloud Native Architectures"
+    },
+    {
+        "file": "chapter10.json",
+        "title": "Chapter 10: Implementing Telemetry and Observability in the Cloud"
+    },
+    {
+        "file": "chapter11.json",
+        "title": "Chapter 11: Automating Cloud Native Application Delivery"
+    },
+    {
+        "file": "chapter12.json",
+        "title": "Chapter 12: Practicing for the KCNA Exam with Mock Papers"
     }
 ]

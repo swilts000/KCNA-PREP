@@ -56,29 +56,19 @@
                 }
             ],
             "lab": {
-                "title": "Container Runtimes Quiz",
-                "type": "quiz",
-                "questions": [
-                    {
-                        "question": "What interface does Kubernetes use to communicate with container runtimes?",
-                        "options": ["CNI", "CSI", "CRI", "OCI"],
-                        "answer": "2"
-                    },
-                    {
-                        "question": "Which runtime runs containers inside lightweight VMs?",
-                        "options": ["containerd", "CRI-O", "Kata Containers", "gVisor"],
-                        "answer": "2"
-                    },
-                    {
-                        "question": "Which runtime type is fastest?",
-                        "options": ["Namespaced", "Virtualized", "Sandboxed"],
-                        "answer": "0"
-                    },
-                    {
-                        "question": "Which runtime intercepts syscalls for extra isolation?",
-                        "options": ["containerd", "CRI-O", "Kata Containers", "gVisor"],
-                        "answer": "3"
-                    }
+                "title": "Container Runtime Types",
+                "type": "dragdrop",
+                "instructions": "Categorize each runtime by its type:",
+                "zones": [
+                    { "id": "namespaced", "title": "Namespaced (Fastest)" },
+                    { "id": "virtualized", "title": "Virtualized (Strongest Isolation)" },
+                    { "id": "sandboxed", "title": "Sandboxed (Balanced)" }
+                ],
+                "items": [
+                    { "text": "containerd", "zone": "namespaced" },
+                    { "text": "CRI-O", "zone": "namespaced" },
+                    { "text": "Kata Containers", "zone": "virtualized" },
+                    { "text": "gVisor", "zone": "sandboxed" }
                 ]
             }
         },
