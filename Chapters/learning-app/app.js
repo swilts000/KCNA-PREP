@@ -6,6 +6,92 @@ let currentChapter = null;
 let currentLab = null;
 let chapters = [];
 let currentChapterFile = null;
+let chapterQuizActive = false;
+let chapterQuizAnswers = {};
+
+// ============================================
+// PROGRESS TRACKING
+// ============================================
+
+const PROGRESS_KEY = 'kcna_progress';
+
+function getProgress() {
+    const stored = localStorage.getItem(PROGRESS_KEY);
+    return stored ? JSON.parse(stored) : {
+        completedLessons: {},  // { 'chapter1.json': [0, 1, 2] }
+        quizScores: {},        // { 'chapter1.json': { score: 8, total: 10, date: '...' } }
+        lastVisited: null
+    };
+}
+
+function saveProgress(progress) {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+}
+
+function markLessonComplete(chapterFile, lessonIndex) {
+    const progress = getProgress();
+    if (!progress.completedLessons[chapterFile]) {
+        progress.completedLessons[chapterFile] = [];
+    }
+    if (!progress.completedLessons[chapterFile].includes(lessonIndex)) {
+        progress.completedLessons[chapterFile].push(lessonIndex);
+    }
+    progress.lastVisited = { chapter: chapterFile, lesson: lessonIndex };
+    saveProgress(progress);
+    updateProgressUI();
+}
+
+function isLessonComplete(chapterFile, lessonIndex) {
+    const progress = getProgress();
+    return progress.completedLessons[chapterFile]?.includes(lessonIndex) || false;
+}
+
+function getChapterProgress(chapterFile, totalLessons) {
+    const progress = getProgress();
+    const completed = progress.completedLessons[chapterFile]?.length || 0;
+    return Math.round((completed / totalLessons) * 100);
+}
+
+function getOverallProgress() {
+    const progress = getProgress();
+    let totalLessons = 0;
+    let completedLessons = 0;
+    
+    chapters.forEach(ch => {
+        // Estimate lessons per chapter (will be updated when loaded)
+        const completed = progress.completedLessons[ch.file]?.length || 0;
+        completedLessons += completed;
+    });
+    
+    // We'll calculate this properly after chapters are loaded
+    return { completedLessons, totalChapters: chapters.length };
+}
+
+function saveQuizScore(chapterFile, score, total) {
+    const progress = getProgress();
+    progress.quizScores[chapterFile] = {
+        score,
+        total,
+        percentage: Math.round((score / total) * 100),
+        date: new Date().toISOString()
+    };
+    saveProgress(progress);
+}
+
+function getQuizScore(chapterFile) {
+    const progress = getProgress();
+    return progress.quizScores[chapterFile] || null;
+}
+
+// Reset all progress
+function resetProgress() {
+    if (confirm('Are you sure you want to reset all progress? This will delete all completed lessons and quiz scores.')) {
+        localStorage.removeItem(PROGRESS_KEY);
+        console.log('Progress reset');
+        // Reload the page to reset UI
+        location.reload();
+    }
+}
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -18,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
             closeChapterMenu();
         }
     });
+    
 });
 
 // Toggle chapter menu
@@ -61,16 +148,49 @@ function renderChapterList() {
     const list = document.getElementById('chapter-list');
     list.innerHTML = '';
     
+    const progress = getProgress();
+    
     chapters.forEach(ch => {
         const btn = document.createElement('button');
-        btn.className = 'chapter-item' + (ch.file === currentChapterFile ? ' active' : '');
-        btn.textContent = ch.title;
+        const isActive = ch.file === currentChapterFile;
+        const quizScore = progress.quizScores[ch.file];
+        const completedCount = progress.completedLessons[ch.file]?.length || 0;
+        
+        btn.className = 'chapter-item' + (isActive ? ' active' : '');
+        
+        // Build chapter item content
+        let statusIcon = '';
+        if (quizScore && quizScore.percentage >= 80) {
+            statusIcon = '<span class="chapter-status completed">✓</span>';
+        } else if (completedCount > 0) {
+            statusIcon = '<span class="chapter-status in-progress">◐</span>';
+        }
+        
+        btn.innerHTML = `
+            <span class="chapter-title">${ch.title}</span>
+            ${statusIcon}
+        `;
         btn.onclick = () => {
             loadChapter(ch.file);
             closeChapterMenu();
         };
         list.appendChild(btn);
     });
+    
+    // Add reset progress button to the dropdown (outside chapter-list)
+    const dropdown = document.getElementById('chapter-dropdown');
+    // Remove existing reset button if any
+    const existingResetBtn = dropdown.querySelector('.reset-btn');
+    if (existingResetBtn) existingResetBtn.remove();
+    
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'chapter-item reset-btn';
+    resetBtn.innerHTML = '<span class="chapter-title">🗑️ Reset All Progress</span>';
+    resetBtn.onclick = () => {
+        resetProgress();
+        closeChapterMenu();
+    };
+    dropdown.appendChild(resetBtn);
 }
 
 // Load a specific chapter
@@ -119,11 +239,30 @@ function renderNavigation() {
 
     currentChapter.lessons.forEach((lesson, index) => {
         const btn = document.createElement('button');
-        btn.className = 'nav-btn' + (index === 0 ? ' active' : '');
-        btn.textContent = lesson.navTitle || lesson.title;
+        const isComplete = isLessonComplete(currentChapterFile, index);
+        btn.className = 'nav-btn' + (index === 0 ? ' active' : '') + (isComplete ? ' completed' : '');
+        btn.innerHTML = `
+            ${isComplete ? '<span class="check-icon">✓</span>' : ''}
+            <span>${lesson.navTitle || lesson.title}</span>
+        `;
         btn.onclick = () => showLesson(index);
         nav.appendChild(btn);
     });
+    
+    // Add Chapter Quiz button
+    const quizBtn = document.createElement('button');
+    const quizScore = getQuizScore(currentChapterFile);
+    quizBtn.className = 'nav-btn chapter-quiz-btn' + (quizScore ? ' completed' : '');
+    quizBtn.innerHTML = `
+        <span>📝 Chapter Quiz</span>
+        ${quizScore ? `<span class="quiz-score-badge">${quizScore.percentage}%</span>` : ''}
+    `;
+    quizBtn.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        startChapterQuiz();
+    };
+    nav.appendChild(quizBtn);
 }
 
 // Render all lessons
@@ -272,14 +411,41 @@ function renderSummary() {
 
 // Show specific lesson
 function showLesson(index) {
+    chapterQuizActive = false;
+    
+    // Hide chapter quiz if visible
+    const quizSection = document.getElementById('chapter-quiz-section');
+    if (quizSection) {
+        quizSection.classList.add('hidden');
+        quizSection.style.display = 'none';
+    }
+    
+    // Show content area
+    document.getElementById('content-area').classList.remove('hidden');
+    document.getElementById('content-area').style.display = 'block';
+    document.getElementById('summary-section').style.display = 'block';
+    
     // Update nav buttons
-    document.querySelectorAll('.nav-btn').forEach((btn, i) => {
+    const navBtns = document.querySelectorAll('.nav-btn:not(.chapter-quiz-btn)');
+    navBtns.forEach((btn, i) => {
         btn.classList.toggle('active', i === index);
     });
+    document.querySelector('.chapter-quiz-btn')?.classList.remove('active');
 
     // Show/hide lessons
     document.querySelectorAll('.lesson').forEach((lesson, i) => {
         lesson.classList.toggle('hidden', i !== index);
+    });
+
+    // Mark lesson as complete after viewing
+    markLessonComplete(currentChapterFile, index);
+    
+    // Update nav to show completion
+    renderNavigation();
+    // Re-highlight current lesson
+    const updatedNavBtns = document.querySelectorAll('.nav-btn:not(.chapter-quiz-btn)');
+    updatedNavBtns.forEach((btn, i) => {
+        btn.classList.toggle('active', i === index);
     });
 
     // Scroll to top
@@ -460,3 +626,289 @@ document.addEventListener('keydown', (e) => {
         closeLab();
     }
 });
+
+// ============================================
+// CHAPTER QUIZ FUNCTIONALITY
+// ============================================
+
+function generateChapterQuiz() {
+    if (!currentChapter) return [];
+    
+    const questions = [];
+    
+    // Collect all labs with quiz type from the chapter
+    currentChapter.lessons.forEach((lesson, lessonIndex) => {
+        if (lesson.lab && lesson.lab.type === 'quiz') {
+            lesson.lab.questions.forEach((q, qIndex) => {
+                questions.push({
+                    ...q,
+                    lessonIndex,
+                    lessonTitle: lesson.navTitle || lesson.title,
+                    originalIndex: qIndex
+                });
+            });
+        }
+    });
+    
+    // If no quiz questions found, generate from content
+    if (questions.length === 0) {
+        // Create basic comprehension questions from key points
+        currentChapter.lessons.forEach((lesson, lessonIndex) => {
+            lesson.cards?.forEach(card => {
+                card.content?.forEach(block => {
+                    if (block.type === 'keypoint' || block.type === 'concept') {
+                        questions.push({
+                            question: `What is the key concept about: ${card.title}?`,
+                            options: ['Review the lesson content'],
+                            answer: 0,
+                            lessonIndex,
+                            lessonTitle: lesson.navTitle || lesson.title,
+                            isReview: true
+                        });
+                    }
+                });
+            });
+        });
+    }
+    
+    // Shuffle and limit to reasonable number
+    return shuffleArray(questions).slice(0, Math.min(15, questions.length));
+}
+
+function shuffleArray(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
+
+function startChapterQuiz() {
+    chapterQuizActive = true;
+    chapterQuizAnswers = {};
+    
+    // Hide lessons and summary
+    const contentArea = document.getElementById('content-area');
+    contentArea.classList.add('hidden');
+    contentArea.style.display = 'none';
+    document.getElementById('summary-section').style.display = 'none';
+    
+    // Update nav
+    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelector('.chapter-quiz-btn')?.classList.add('active');
+    
+    // Create or show quiz section
+    let quizSection = document.getElementById('chapter-quiz-section');
+    if (!quizSection) {
+        quizSection = document.createElement('section');
+        quizSection.id = 'chapter-quiz-section';
+        quizSection.className = 'chapter-quiz-section';
+        // Insert after the nav, before the content-area
+        const nav = document.getElementById('lesson-nav');
+        nav.parentNode.insertBefore(quizSection, nav.nextSibling);
+    }
+    
+    const questions = generateChapterQuiz();
+    const previousScore = getQuizScore(currentChapterFile);
+    
+    quizSection.innerHTML = `
+        <div class="chapter-quiz-container">
+            <div class="quiz-header">
+                <h2>📝 Chapter Quiz: ${currentChapter.title}</h2>
+                <p class="quiz-subtitle">Test your knowledge of this chapter</p>
+                ${previousScore ? `<p class="previous-score">Previous best: ${previousScore.percentage}% (${previousScore.score}/${previousScore.total})</p>` : ''}
+            </div>
+            
+            <div class="quiz-progress-bar">
+                <div class="quiz-progress-fill" id="quizProgressFill" style="width: 0%"></div>
+            </div>
+            <p class="quiz-progress-text" id="quizProgressText">Question 1 of ${questions.length}</p>
+            
+            <div class="quiz-questions" id="chapterQuizQuestions">
+                ${questions.map((q, i) => renderChapterQuizQuestion(q, i, questions.length)).join('')}
+            </div>
+            
+            <div class="quiz-actions">
+                <button class="quiz-submit-btn" id="submitChapterQuiz" onclick="submitChapterQuiz()">
+                    Submit Quiz
+                </button>
+            </div>
+            
+            <div class="quiz-results hidden" id="chapterQuizResults"></div>
+        </div>
+    `;
+    
+    quizSection.classList.remove('hidden');
+    quizSection.style.display = 'block';
+    
+    // Store questions for grading
+    quizSection.dataset.questions = JSON.stringify(questions);
+    
+    window.scrollTo({ top: 200, behavior: 'smooth' });
+}
+
+function renderChapterQuizQuestion(q, index, total) {
+    if (q.isReview) {
+        return `
+            <div class="chapter-quiz-question review-item" data-index="${index}">
+                <p class="question-number">Review Item ${index + 1}</p>
+                <p class="question-text">${q.question}</p>
+                <p class="lesson-ref">From: ${q.lessonTitle}</p>
+                <button class="review-lesson-btn" onclick="showLesson(${q.lessonIndex})">Review Lesson</button>
+            </div>
+        `;
+    }
+    
+    const inputType = q.multi ? 'checkbox' : 'radio';
+    
+    return `
+        <div class="chapter-quiz-question" data-index="${index}">
+            <p class="question-number">Question ${index + 1} of ${total}</p>
+            <p class="question-text">${q.question}</p>
+            <p class="lesson-ref">From: ${q.lessonTitle}</p>
+            <div class="chapter-quiz-options">
+                ${q.options.map((opt, optIndex) => `
+                    <label class="chapter-quiz-option">
+                        <input type="${inputType}" 
+                               name="chapter-q-${index}" 
+                               value="${opt.value !== undefined ? opt.value : optIndex}"
+                               onchange="updateQuizAnswer(${index}, this)">
+                        <span class="option-text">${opt.text || opt}</span>
+                    </label>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function updateQuizAnswer(questionIndex, input) {
+    const questions = JSON.parse(document.getElementById('chapter-quiz-section').dataset.questions);
+    const q = questions[questionIndex];
+    
+    if (q.multi) {
+        if (!chapterQuizAnswers[questionIndex]) {
+            chapterQuizAnswers[questionIndex] = [];
+        }
+        if (input.checked) {
+            chapterQuizAnswers[questionIndex].push(input.value);
+        } else {
+            chapterQuizAnswers[questionIndex] = chapterQuizAnswers[questionIndex].filter(v => v !== input.value);
+        }
+    } else {
+        chapterQuizAnswers[questionIndex] = input.value;
+    }
+    
+    // Update progress
+    const answered = Object.keys(chapterQuizAnswers).length;
+    const total = questions.filter(q => !q.isReview).length;
+    const percentage = Math.round((answered / total) * 100);
+    
+    document.getElementById('quizProgressFill').style.width = `${percentage}%`;
+    document.getElementById('quizProgressText').textContent = `${answered} of ${total} answered`;
+}
+
+function submitChapterQuiz() {
+    const questions = JSON.parse(document.getElementById('chapter-quiz-section').dataset.questions);
+    const gradableQuestions = questions.filter(q => !q.isReview);
+    
+    let correct = 0;
+    const results = [];
+    
+    gradableQuestions.forEach((q, i) => {
+        const originalIndex = questions.indexOf(q);
+        const userAnswer = chapterQuizAnswers[originalIndex];
+        let isCorrect = false;
+        
+        if (q.multi) {
+            const correctAnswers = (Array.isArray(q.answer) ? q.answer : [q.answer]).map(String).sort();
+            const userAnswers = (userAnswer || []).map(String).sort();
+            isCorrect = arraysEqual(correctAnswers, userAnswers);
+        } else {
+            isCorrect = String(userAnswer) === String(q.answer);
+        }
+        
+        if (isCorrect) correct++;
+        
+        results.push({
+            question: q.question,
+            correct: isCorrect,
+            userAnswer,
+            correctAnswer: q.answer,
+            lessonTitle: q.lessonTitle,
+            lessonIndex: q.lessonIndex
+        });
+        
+        // Highlight question
+        const questionEl = document.querySelector(`.chapter-quiz-question[data-index="${originalIndex}"]`);
+        if (questionEl) {
+            questionEl.classList.add(isCorrect ? 'correct' : 'incorrect');
+        }
+    });
+    
+    const total = gradableQuestions.length;
+    const percentage = Math.round((correct / total) * 100);
+    
+    // Save score
+    saveQuizScore(currentChapterFile, correct, total);
+    
+    // Show results
+    const resultsDiv = document.getElementById('chapterQuizResults');
+    resultsDiv.innerHTML = `
+        <div class="results-header ${percentage >= 80 ? 'pass' : percentage >= 60 ? 'partial' : 'fail'}">
+            <h3>${percentage >= 80 ? '🎉 Excellent!' : percentage >= 60 ? '👍 Good Job!' : '📚 Keep Studying!'}</h3>
+            <div class="score-display">
+                <span class="score-number">${correct}</span>
+                <span class="score-divider">/</span>
+                <span class="score-total">${total}</span>
+            </div>
+            <p class="score-percentage">${percentage}%</p>
+        </div>
+        
+        <div class="results-breakdown">
+            <h4>Review Your Answers:</h4>
+            ${results.map((r, i) => `
+                <div class="result-item ${r.correct ? 'correct' : 'incorrect'}">
+                    <span class="result-icon">${r.correct ? '✓' : '✗'}</span>
+                    <div class="result-content">
+                        <p class="result-question">${r.question}</p>
+                        ${!r.correct ? `<p class="result-hint">Review: ${r.lessonTitle}</p>` : ''}
+                    </div>
+                    ${!r.correct ? `<button class="review-btn" onclick="showLesson(${r.lessonIndex})">Review</button>` : ''}
+                </div>
+            `).join('')}
+        </div>
+        
+        <div class="results-actions">
+            <button class="retake-btn" onclick="startChapterQuiz()">Retake Quiz</button>
+            <button class="continue-btn" onclick="showLesson(0)">Back to Lessons</button>
+        </div>
+    `;
+    resultsDiv.classList.remove('hidden');
+    
+    // Hide submit button
+    document.getElementById('submitChapterQuiz').classList.add('hidden');
+    
+    // Update chapter list to show completion
+    renderChapterList();
+    renderNavigation();
+    
+    // Scroll to results
+    resultsDiv.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ============================================
+// PROGRESS UI UPDATE
+// ============================================
+
+function updateProgressUI() {
+    // Update navigation buttons with completion status
+    if (currentChapter && currentChapterFile) {
+        const navBtns = document.querySelectorAll('.nav-btn:not(.chapter-quiz-btn)');
+        navBtns.forEach((btn, i) => {
+            if (isLessonComplete(currentChapterFile, i)) {
+                btn.classList.add('completed');
+            }
+        });
+    }
+}
